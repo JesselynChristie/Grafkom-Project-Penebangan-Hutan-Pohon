@@ -1610,7 +1610,7 @@
 
       let getar = false;
       let durasiGetar = 0;
-      let y = 1.5;
+      let y = 0;
       // Fungsi ini akan dipanggil berulang-ulang, biasanya 60 kali per detik (tergantung layar komputermu).
       function animate() {
         // Meminta browser untuk memanggil fungsi animate() lagi di frame berikutnya.
@@ -1677,6 +1677,7 @@
 
           if (durasiGetar === 0) {
             getar = true;
+            camera.position.y = y;
           }
         } else if (getar) {
           getar = false;
