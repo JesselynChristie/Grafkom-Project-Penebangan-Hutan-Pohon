@@ -152,7 +152,7 @@
       const controls = new THREE.PointerLockControls(camera, document.body);
 
       // Sesuaikan tinggi kamera layaknya tinggi mata manusia sedang berdiri di atas lantai (Y = 1.5)
-      camera.position.y = 1.5;
+      camera.position.y = 0;
 
       // 2. Menghubungkan Layar Menu (Blocker) dengan Kontrol Game
       const blocker = document.getElementById("blocker");
@@ -1653,9 +1653,9 @@
             durasiGetar = 5;
           }
         } else if (!tumbang) {
-          const anginPohon = Date.now() * 0.0075;
-          pineTree.rotation.z = Math.sin(anginPohon) * 0.0075;
-          pineTree.rotation.x = Math.cos(anginPohon) * 0.0075;
+          const anginPohon = Date.now() * 0.5;
+          pineTree.rotation.z = Math.sin(anginPohon) * 0.5;
+          pineTree.rotation.x = Math.cos(anginPohon) * 0.5;
         }
 
         if (mushroom) {
