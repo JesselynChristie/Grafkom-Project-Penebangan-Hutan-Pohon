@@ -1,0 +1,1738 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aplikasi Three.js Penebangan Hutan/Penebangan Pohon</title>
+
+    <style>
+      /* Mengatur agar body tidak memiliki margin dan mengambil seluruh tinggi layar */
+      body {
+        margin: 0;
+        overflow: hidden; /* Mencegah munculnya scrollbar */
+        background-color: #1a1a1a; /* Latar belakang gelap untuk kontras dengan objek 3D */
+        color: white;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      /* Styling untuk teks penjelasan yang akan tampil di atas canvas 3D */
+      #info {
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        text-align: center;
+        z-index: 100; /* Memastikan teks selalu berada di atas objek 3D */
+        pointer-events: none; /* Memastikan teks tidak menghalangi interaksi mouse dengan canvas */
+        text-shadow: 1px 1px 2px black; /* Memberikan efek bayangan agar teks lebih mudah dibaca */
+      }
+
+      /* Styling untuk Crosshair (Tanda + di tengah layar) */
+      #crosshair {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(
+          -50%,
+          -50%
+        ); /* Trik CSS untuk memastikan elemen benar-benar tepat di tengah */
+        color: rgba(
+          255,
+          255,
+          255,
+          0.7
+        ); /* Warna putih yang sedikit transparan */
+        font-size: 30px;
+        font-weight: bold;
+        z-index: 100;
+        pointer-events: none; /* PENTING! Agar tanda + ini tidak menghalangi klik mouse kita */
+        display: none; /* Kita sembunyikan dulu, nanti dimunculkan saat masuk mode Game */
+        user-select: none; /* Agar teks "+" tidak bisa diblok/diseleksi */
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Layar Menu Utama (Blocker) -->
+    <!-- Aturan Keamanan Browser: Untuk bisa menyembunyikan mouse (Lock Pointer), pengguna WAJIB berinteraksi/klik layar terlebih dahulu. -->
+    <div
+      id="blocker"
+      style="
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        z-index: 999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        color: white;
+        font-family: sans-serif;
+      "
+    >
+      <h1
+        style="
+          font-size: 40px;
+          cursor: pointer;
+          border: 2px solid #00ffaa;
+          padding: 15px 30px;
+          border-radius: 10px;
+          color: #00ffaa;
+          text-transform: uppercase;
+        "
+      >
+        ▶ Klik Untuk Bermain
+      </h1>
+      <p style="font-size: 1.2em">
+        <strong>W, A, S, D</strong> = Berjalan | <strong>Mouse</strong> =
+        Menoleh | <strong>ESC</strong> = Keluar
+      </p>
+    </div>
+
+    <div id="info">
+      <h1>Halo Dunia 3D!</h1>
+      <p>WASD dalam Three.js. Coba klik benda untuk tes raycasting.</p>
+    </div>
+
+    <!-- Tanda bidik (Crosshair) di tengah layar -->
+    <div id="crosshair">+</div>
+
+    <!-- Kita menggunakan CDN (Content Delivery Network) untuk mengambil library Three.js -->
+    <!-- Versi ini cukup stabil untuk memulai belajar -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Kita MENGHAPUS OrbitControls, dan MENGGANTINYA dengan PointerLockControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+
+    <!-- Menambahkan GLTFLoader untuk membaca file .gltf / .glb -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+      // ==============================================================================
+      // LANGKAH 1: PERSIAPAN DASAR
+      // Kita butuh 3 hal utama dalam Three.js: Adegan (Scene), Kamera (Camera), dan Perender (Renderer).
+      // ==============================================================================
+
+      // 1. Adegan (Scene)
+      // Ini seperti panggung kosong tempat kita akan meletakkan semua objek 3D, cahaya, dan kamera.
+      const scene = new THREE.Scene();
+
+      // 2. Kamera (Camera)
+      // Ini adalah mata kita untuk melihat ke dalam panggung (scene).
+      // Kita menggunakan PerspectiveCamera, yang melihat objek seperti mata manusia (benda jauh terlihat lebih kecil).
+      // Argumennya: Field of View (sudut pandang), Aspect Ratio (rasio aspek layar), Near (jarak pandang terdekat), Far (jarak pandang terjauh).
+      const camera = new THREE.PerspectiveCamera(
+        75, // Sudut pandang 75 derajat (standar untuk game/aplikasi)
+        window.innerWidth / window.innerHeight, // Menyesuaikan rasio dengan ukuran layar
+        0.1, // Jangan render objek yang jaraknya kurang dari 0.1 dari kamera
+        1000, // Jangan render objek yang jaraknya lebih dari 1000 dari kamera
+      );
+
+      // Kita perlu memundurkan kamera sedikit agar objek (yang ada di titik tengah 0,0,0) bisa terlihat.
+      camera.position.z = 5;
+
+      // 3. Perender (Renderer)
+      // Ini adalah mesin yang menggambar adegan dari sudut pandang kamera ke layar komputermu (ke dalam elemen <canvas>).
+      const renderer = new THREE.WebGLRenderer({ antialias: true }); // antialias: true membuat tepi objek lebih halus (tidak bergerigi)
+      renderer.setSize(window.innerWidth, window.innerHeight); // Mengatur ukuran canvas sebesar layar
+
+      // SAKELAR 1: MENGAKTIFKAN BAYANGAN DI RENDERER
+      // Secara default bayangan dimatikan. Kita harus menyalakannya di sini.
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Membuat ujung bayangan sedikit buram/halus agar lebih realistis
+
+      // Memasukkan hasil render (elemen <canvas>) ke dalam HTML kita agar bisa dilihat
+      document.body.appendChild(renderer.domElement);
+
+      // ==============================================================================
+      // LANGKAH 1.5: KONTROL FIRST-PERSON (WASD + MOUSE)
+      // Kita mengganti OrbitControls dengan PointerLockControls untuk gaya bermain Game.
+      // ==============================================================================
+
+      // 1. Mengaktifkan Plugin PointerLock (Sudut Pandang Orang Pertama)
+      const controls = new THREE.PointerLockControls(camera, document.body);
+
+      // Sesuaikan tinggi kamera layaknya tinggi mata manusia sedang berdiri di atas lantai (Y = 1.5)
+      camera.position.y = 1.5;
+
+      // 2. Menghubungkan Layar Menu (Blocker) dengan Kontrol Game
+      const blocker = document.getElementById("blocker");
+      const crosshair = document.getElementById("crosshair"); // Ambil elemen crosshair dari HTML
+
+      // Jika layar menu diklik, perintahkan browser untuk "menculik/mengunci" kursor mouse
+      blocker.addEventListener("click", function () {
+        controls.lock();
+      });
+
+      // Jika kursor berhasil dikunci (tanda permainan dimulai), sembunyikan layar menu
+      controls.addEventListener("lock", function () {
+        blocker.style.display = "none";
+        crosshair.style.display = "block"; // Munculkan crosshair saat mulai bermain
+      });
+
+      // Jika pengguna menekan tombol "ESC" di keyboard (keluar mode), munculkan layar menu kembali
+      controls.addEventListener("unlock", function () {
+        blocker.style.display = "flex";
+        crosshair.style.display = "none"; // Sembunyikan kembali crosshair
+      });
+
+      // 3. Sistem "Ingatan" Keyboard (Logika Boolean)
+      // Komputer tidak tahu jika tombol DITAHAN. Ia hanya tahu kapan "Ditekan" dan kapan "Dilepas".
+      // Jadi, kita buat sakelar On/Off (True/False) untuk mengingat apakah tombol sedang aktif.
+      let moveForward = false;
+      let moveBackward = false;
+      let moveLeft = false;
+      let moveRight = false;
+
+      // Mendengarkan kejadian saat tombol DITEKAN (On)
+      document.addEventListener("keydown", (event) => {
+        // event.code membaca letak fisik tombol, bukan huruf kapital/kecilnya
+        switch (event.code) {
+          case "KeyW":
+            moveForward = true;
+            break;
+          case "KeyA":
+            moveLeft = true;
+            break;
+          case "KeyS":
+            moveBackward = true;
+            break;
+          case "KeyD":
+            moveRight = true;
+            break;
+        }
+      });
+
+      // Mendengarkan kejadian saat tombol DILEPAS (Off)
+      document.addEventListener("keyup", (event) => {
+        switch (event.code) {
+          case "KeyW":
+            moveForward = false;
+            break;
+          case "KeyA":
+            moveLeft = false;
+            break;
+          case "KeyS":
+            moveBackward = false;
+            break;
+          case "KeyD":
+            moveRight = false;
+            break;
+        }
+      });
+
+      // ==============================================================================
+      // PERSIAPAN TEKSTUR (MEMUAT GAMBAR)
+      // Kita menyuruh komputer mengunduh gambar-gambar tekstur dari server sebelum dipakai.
+      // ==============================================================================
+      const textureLoader = new THREE.TextureLoader();
+
+      // Memuat gambar untuk masing-masing benda
+      const texLantai = textureLoader.load("textures/mud_forest_diff_4k.jpg");
+
+      // ==============================================================================
+      // LANGKAH 2: MEMBUAT LANTAI UNTUK MENANGKAP BAYANGAN
+      // Bayangan butuh tempat untuk jatuh, kan? Kita akan membuat lantai datar (Plane).
+      // ==============================================================================
+
+      // A. Bentuk: Bidang datar berukuran 10x10
+      const floorGeometry = new THREE.PlaneGeometry(10, 10);
+
+      // B. Bahan: Warna abu-abu standar
+      const floorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        map: texLantai,
+      });
+
+      // C. Mesh Lantai
+      const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+
+      // D. Penyesuaian Lantai
+      // 1. Memutar lantai 90 derajat.
+      // (Secara default, bidang datar PlaneGeometry berdiri tegak menatap kamera seperti dinding).
+      // Di matematika 3D, memutar 90 derajat sama dengan memutar setengah nilai PI (Math.PI / 2).
+      // Kita gunakan tanda minus (-) agar bidangnya rebah/tidur ke belakang.
+      floor.rotation.x = -Math.PI / 2;
+
+      // 2. Menurunkan lantai sedikit (ke posisi Y = -1)
+      // agar lantainya tidak berada persis memotong di tengah-tengah perut si kubus.
+      floor.position.y = -1;
+
+      // 3. SAKELAR 4: Mengizinkan lantai MENERIMA bayangan (RECEIVER)
+      floor.receiveShadow = true;
+
+      // Masukkan lantai ke panggung
+      scene.add(floor);
+
+      // ==============================================================================
+      // LANGKAH 2.1: INTERAKSI KLIK (RAYCASTING)
+      // Kita membuat "Sinar Laser" tak terlihat dari kamera untuk mendeteksi benda apa yang sedang kita tatap.
+      // ==============================================================================
+
+      // Alat pemicu sinar laser
+      const raycaster = new THREE.Raycaster();
+
+      // Titik pusat layar.
+      // Di matematika web 3D (Normalized Device Coordinates), titik persis di tengah layar selalu bernilai X:0, Y:0.
+      const centerPosition = new THREE.Vector2(0, 0);
+
+      // Variabel untuk "mengingat" benda apa yang sedang kita sentuh/perbesar.
+      // Supaya saat klik DILEPAS nanti, kita tahu benda mana yang harus dikecilkan kembali.
+      let interactedObject = null;
+
+      // Daftar benda yang boleh bereaksi dengan klik kita.
+      // Kita jadikan kelompok array (daftar) agar lantai (floor) tidak ikut bereaksi.
+      const interactableObjects = [];
+
+      // ==============================================================================
+      // LANGKAH 2.2: MEMUAT MODEL 3D DARI FILE (GLTF/GLB)
+      // ==============================================================================
+
+      // 1. Memanggil mesin pembaca GLTF
+      const gltfLoader = new THREE.GLTFLoader();
+
+      // 2. Mulai mengunduh dan membaca file biohazard_barrel___low_poly.glb
+      gltfLoader.load(
+        "models/biohazard_barrel___low_poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file biohazard_barrel___low_poly.glb sudah terunduh 100%.
+          // Di dalam file biohazard_barrel___low_poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const barrel = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Barrel
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          barrel.position.set(-3.5, -0.6, 0.5);
+
+          barrel.scale.set(0.35, 0.35, 0.35);
+
+          barrel.rotation.y = Math.PI / 3;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Barrel
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh barrel satu per satu!"
+          barrel.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Barrel ke atas panggung utama kita
+          scene.add(barrel);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! biohazard_barrel___low_poly.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Barrel terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat barrel. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file free_wooden_house_cabin_with_fence_low_poly.glb
+      gltfLoader.load(
+        "models/free_wooden_house_cabin_with_fence_low_poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file free_wooden_house_cabin_with_fence_low_poly.glb sudah terunduh 100%.
+          // Di dalam file free_wooden_house_cabin_with_fence_low_poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const cabin = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Cabin
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          cabin.position.set(1.8, -1.1, -1.2);
+
+          cabin.scale.set(0.32, 0.32, 0.32);
+
+          cabin.rotation.y = Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Cabin
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh cabin satu per satu!"
+          cabin.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 1;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Cabin ke atas panggung utama kita
+          scene.add(cabin);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log(
+            "Hore! free_wooden_house_cabin_with_fence_low_poly.glb berhasil dimuat!",
+          );
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Cabin terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat cabin. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      let bensin = false;
+      let isiBensin = false;
+      let jerrycan = null;
+      // 2. Mulai mengunduh dan membaca file jerrycan_low-poly.glb
+      gltfLoader.load(
+        "models/jerrycan_low-poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file jerrycan_low-poly.glb sudah terunduh 100%.
+          // Di dalam file jerrycan_low-poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          jerrycan = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Jerrycan
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          jerrycan.position.set(-2.8, -1.0, -0.8);
+
+          jerrycan.scale.set(0.4, 0.4, 0.4);
+
+          jerrycan.rotation.y = -Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Jerrycan
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh jerrycan satu per satu!"
+          jerrycan.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Jerrycan ke atas panggung utama kita
+          scene.add(jerrycan);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! jerrycan_low-poly.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Jerrycan terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat jerrycan. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file low_poly_campfire.glb
+      gltfLoader.load(
+        "models/low_poly_campfire.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_campfire.glb sudah terunduh 100%.
+          // Di dalam file low_poly_campfire.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const campfire = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Campfire
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          campfire.position.set(-1, -1.135, 0.6);
+
+          campfire.scale.set(0.8, 0.8, 0.8);
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Campfire
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh campfire satu per satu!"
+          campfire.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Campfire ke atas panggung utama kita
+          scene.add(campfire);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low_poly_campfire.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Campfire terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat campfire. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      let tebang = false;
+      let alatTebangPohon = [];
+      // 2. Mulai mengunduh dan membaca file low_poly_chainsaw_-_jonniemadeit.glb
+      gltfLoader.load(
+        "models/low_poly_chainsaw_-_jonniemadeit.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_chainsaw_-_jonniemadeit.glb sudah terunduh 100%.
+          // Di dalam file low_poly_chainsaw_-_jonniemadeit.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const chainsaw = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Chainsaw
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          chainsaw.position.set(2.2, -0.55, 1.0);
+
+          chainsaw.scale.set(0.25, 0.25, 0.25);
+
+          chainsaw.rotation.y = Math.PI / 2;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Chainsaw
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh chainsaw satu per satu!"
+
+          chainsaw.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          alatTebangPohon.push(chainsaw);
+          // 5. Masukkan si Chainsaw ke atas panggung utama kita
+          scene.add(chainsaw);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log(
+            "Hore! low_poly_chainsaw_-_jonniemadeit.glb berhasil dimuat!",
+          );
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Chainsaw terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat chainsaw. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file low_poly_hand_saw.glb
+      gltfLoader.load(
+        "models/low_poly_hand_saw.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_hand_saw.glb sudah terunduh 100%.
+          // Di dalam file low_poly_hand_saw.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const handSaw = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Hand Saw
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          handSaw.position.set(1.8, -0.65, 1.2);
+
+          handSaw.scale.set(0.8, 0.8, 0.8);
+
+          handSaw.rotation.x = -Math.PI / 2;
+
+          handSaw.rotation.z = Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Hand Saw
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh handSaw satu per satu!"
+          handSaw.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          alatTebangPohon.push(handSaw);
+          // 5. Masukkan si Hand Saw ke atas panggung utama kita
+          scene.add(handSaw);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low_poly_hand_saw.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Hand Saw terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat hand saw. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      let truck = null;
+      let lampuKiri, lampuKanan;
+      // 2. Mulai mengunduh dan membaca file low_poly_pickup_truck_v3.glb
+      gltfLoader.load(
+        "models/low_poly_pickup_truck_v3.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_pickup_truck_v3.glb sudah terunduh 100%.
+          // Di dalam file low_poly_pickup_truck_v3.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          truck = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Truck
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          truck.position.set(2.5, -1.0, 2.5);
+
+          truck.scale.set(1.0, 1.0, 1.0);
+
+          truck.rotation.y = -Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Truck
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh truck satu per satu!"
+          truck.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Truck ke atas panggung utama kita
+          scene.add(truck);
+
+          lampuKiri = new THREE.SpotLight(0xfffaed, 0, 15, Math.PI / 6, 0.8, 1);
+          lampuKiri.position.set(-0.45, 0.45, -1.4);
+
+          lampuKanan = new THREE.SpotLight(
+            0xfffaed,
+            0,
+            15,
+            Math.PI / 6,
+            0.8,
+            1,
+          );
+          lampuKanan.position.set(0.45, 0.45, -1.4);
+
+          const targetLampuKiri = new THREE.Object3D();
+          targetLampuKiri.position.set(-0.45, 0.2, -5.0);
+
+          const targetLampuKanan = new THREE.Object3D();
+          targetLampuKanan.position.set(0.45, 0.2, -5.0);
+
+          truck.add(targetLampuKiri);
+          truck.add(targetLampuKanan);
+          lampuKiri.target = targetLampuKiri;
+          lampuKanan.target = targetLampuKanan;
+
+          lampuKiri.castShadow = true;
+          lampuKanan.castShadow = true;
+
+          truck.add(lampuKiri);
+          truck.add(lampuKanan);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low_poly_pickup_truck_v3.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Truck terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat truck. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file low_poly_pvs-31s.glb
+      gltfLoader.load(
+        "models/low_poly_pvs-31s.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_pvs-31s.glb sudah terunduh 100%.
+          // Di dalam file low_poly_pvs-31s.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const google = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Google
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          google.position.set(2.0, -0.45, 1.15);
+
+          google.scale.set(0.15, 0.15, 0.15);
+
+          google.rotation.y = 0;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Google
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh google satu per satu!"
+          google.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Google ke atas panggung utama kita
+          scene.add(google);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low_poly_pvs-31s.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Google terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat google. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file low_poly_stylized_wooden_bucket.glb
+      gltfLoader.load(
+        "models/low_poly_stylized_wooden_bucket.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_stylized_wooden_bucket.glb sudah terunduh 100%.
+          // Di dalam file low_poly_stylized_wooden_bucket.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const bucket = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Bucket
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          bucket.position.set(-3.5, -0.65, 1.2);
+
+          bucket.scale.set(0.2, 0.2, 0.2);
+
+          bucket.rotation.y = -Math.PI / 6;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Bucket
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh bucket satu per satu!"
+          bucket.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Bucket ke atas panggung utama kita
+          scene.add(bucket);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log(
+            "Hore! low_poly_stylized_wooden_bucket.glb berhasil dimuat!",
+          );
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Bucket terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat bucket. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file low_poly_thermos.glb
+      gltfLoader.load(
+        "models/low_poly_thermos.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_thermos.glb sudah terunduh 100%.
+          // Di dalam file low_poly_thermos.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const thermos = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Thermos
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          thermos.position.set(-2, -0.75, 1.2);
+
+          thermos.scale.set(0.15, 0.15, 0.15);
+
+          thermos.rotation.y = Math.PI / 2;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Thermos
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh thermos satu per satu!"
+          thermos.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Thermos ke atas panggung utama kita
+          scene.add(thermos);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low_poly_thermos.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Thermos terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat thermos. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      //   2. Mulai mengunduh dan membaca file low_poly_tree_stump.glb
+      gltfLoader.load(
+        "models/low_poly_tree_stump.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low_poly_tree_stump.glb sudah terunduh 100%.
+          // Di dalam file low_poly_tree_stump.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const treeStump = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Tree Stump
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          treeStump.position.set(-2, -1.0, 1);
+
+          treeStump.scale.set(0.006, 0.006, 0.006);
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Tree Stump
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh tree stump satu per satu!"
+          treeStump.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Tree Stump ke atas panggung utama kita
+          scene.add(treeStump);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low_poly_tree_stump.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Tree Stump terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat tree stump. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file low-poly_forest_boulder.glb
+      gltfLoader.load(
+        "models/low-poly_forest_boulder.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file low-poly_forest_boulder.glb sudah terunduh 100%.
+          // Di dalam file low-poly_forest_boulder.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const boulder = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Boulder
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          boulder.position.set(3.5, -1.0, 3.5);
+
+          boulder.scale.set(1.2, 1.2, 1.2);
+
+          boulder.rotation.y = Math.random() * Math.PI;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Boulder
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh boulder satu per satu!"
+          boulder.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Boulder ke atas panggung utama kita
+          scene.add(boulder);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! low-poly_forest_boulder.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Boulder terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat boulder. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file lowpolywoodshed.glb
+      gltfLoader.load(
+        "models/lowpolywoodshed.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file lowpolywoodshed.glb sudah terunduh 100%.
+          // Di dalam file lowpolywoodshed.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const shed = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Shed
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          shed.position.set(-3.5, -1.0, -4.0);
+
+          shed.scale.set(0.35, 0.35, 0.35);
+
+          shed.rotation.y = Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Shed
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh shed satu per satu!"
+          shed.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Shed ke atas panggung utama kita
+          scene.add(shed);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! lowpolywoodshed.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Shed terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat shed. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file lumberjack_axe_low-poly.glb
+      gltfLoader.load(
+        "models/lumberjack_axe_low-poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file lumberjack_axe_low-poly.glb sudah terunduh 100%.
+          // Di dalam file lumberjack_axe_low-poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const axe = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Axe
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          axe.position.set(-1.6, -1.0, 1.4);
+
+          axe.scale.set(1.0, 1.0, 1.0);
+
+          axe.rotation.y = Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Axe
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh axe satu per satu!"
+          axe.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          alatTebangPohon.push(axe);
+          // 5. Masukkan si Axe ke atas panggung utama kita
+          scene.add(axe);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! lumberjack_axe_low-poly.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Axe terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat axe. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file oil_drums_with_stand__low-poly.glb
+      gltfLoader.load(
+        "models/oil_drums_with_stand__low-poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file oil_drums_with_stand__low-poly.glb sudah terunduh 100%.
+          // Di dalam file oil_drums_with_stand__low-poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const oilDrums = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Oil Drums
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          oilDrums.position.set(-3.5, -0.6, -3);
+
+          oilDrums.scale.set(0.9, 0.9, 0.9);
+
+          oilDrums.rotation.y = Math.PI / 4;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Oil Drums
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh oil drums satu per satu!"
+          oilDrums.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Oil Drums ke atas panggung utama kita
+          scene.add(oilDrums);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log(
+            "Hore! oil_drums_with_stand__low-poly.glb berhasil dimuat!",
+          );
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Oil Drums terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat oil drums. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      let pohonTumbang = false;
+      let pineTree = null;
+      let angleTumbang = 0;
+      let tumbang = false;
+      // 2. Mulai mengunduh dan membaca file pine_tree_low-poly.glb
+      gltfLoader.load(
+        "models/pine_tree_low-poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file pine_tree_low-poly.glb sudah terunduh 100%.
+          // Di dalam file pine_tree_low-poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          pineTree = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Pine Tree
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          pineTree.position.set(-0.8, -1.0, -0.5);
+
+          pineTree.scale.set(0.012, 0.012, 0.012);
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Pine Tree
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh pineTree satu per satu!"
+          pineTree.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Pine Tree ke atas panggung utama kita
+          scene.add(pineTree);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! pine_tree_low-poly.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Pine Tree terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat pine_tree_low-poly.glb. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      let mushroom = null;
+      // 2. Mulai mengunduh dan membaca file stylized_mushrooms_-_low_poly.glb
+      gltfLoader.load(
+        "models/stylized_mushrooms_-_low_poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file stylized_mushrooms_-_low_poly.glb sudah terunduh 100%.
+          // Di dalam file stylized_mushrooms_-_low_poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          mushroom = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Mushroom
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          mushroom.position.set(-0.5, -1.0, 0.8);
+
+          mushroom.scale.set(1, 1, 1);
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Mushroom
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh mushroom satu per satu!"
+          mushroom.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Mushroom ke atas panggung utama kita
+          scene.add(mushroom);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log(
+            "Hore! stylized_mushrooms_-_low_poly.glb berhasil dimuat!",
+          );
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Mushroom terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat mushroom. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      let wheelbarrow = null;
+      let dorongGerobak = false;
+      // 2. Mulai mengunduh dan membaca file wheelbarrow_-_low_poly.glb
+      gltfLoader.load(
+        "models/wheelbarrow_-_low_poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file wheelbarrow_-_low_poly.glb sudah terunduh 100%.
+          // Di dalam file wheelbarrow_-_low_poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          wheelbarrow = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Wheelbarrow
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          wheelbarrow.position.set(-3.2, -1.0, -1.2);
+
+          wheelbarrow.scale.set(0.35, 0.35, 0.35);
+
+          wheelbarrow.rotation.y = Math.PI / 3;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Wheelbarrow
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh wheelbarrow satu per satu!"
+          wheelbarrow.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Wheelbarrow ke atas panggung utama kita
+          scene.add(wheelbarrow);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! wheelbarrow_-_low_poly.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Wheelbarrow terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat wheelbarrow. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file wood_log_pile_-_ps1_low_poly.glb
+      gltfLoader.load(
+        "models/wood_log_pile_-_ps1_low_poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file wood_log_pile_-_ps1_low_poly.glb sudah terunduh 100%.
+          // Di dalam file wood_log_pile_-_ps1_low_poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const wood_log_pile = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Wood Log Pile
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          wood_log_pile.position.set(-1, -1.0, -1.5);
+
+          wood_log_pile.scale.set(0.5, 0.5, 0.5);
+
+          wood_log_pile.rotation.y = -Math.PI / 3;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Wood Log Pile
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh wood_log_pile satu per satu!"
+          wood_log_pile.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Wood Log Pile ke atas panggung utama kita
+          scene.add(wood_log_pile);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log(
+            "Hore! wood_log_pile_-_ps1_low_poly.glb berhasil dimuat!",
+          );
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 +
+              "% Wood Log Pile terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat wood_log_pile. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // 2. Mulai mengunduh dan membaca file workbench_low-poly.glb
+      gltfLoader.load(
+        "models/workbench_low-poly.glb", // Pastikan alamat folder dan nama filenya benar
+        function (gltf) {
+          // Fungsi ini HANYA dipanggil jika file workbench_low-poly.glb sudah terunduh 100%.
+          // Di dalam file workbench_low-poly.glb, bisa terdapat kamera, lampu, dll.
+          // Kita hanya tertarik mengambil panggung/objek utamanya saja (scene).
+          const workbench = gltf.scene;
+
+          // 3. Menyesuaikan posisi dan rotasi Workbench
+          // karena titik pusat dari Blender kadang berbeda dengan posisi lantainya.
+          workbench.position.set(2.0, -1.0, 1.0);
+
+          workbench.scale.set(0.75, 0.75, 0.75);
+
+          workbench.rotation.y = -Math.PI / 2;
+
+          // 4. Mengaktifkan Bayangan dan Raycasting (Klik) pada bagian tubuh Workbench
+          // Fungsi .traverse() menyuruh komputer: "Tolong periksa bagian tubuh workbench satu per satu!"
+          workbench.traverse(function (bagian) {
+            // Jika potongan tubuh tersebut adalah benda padat (Mesh)
+            if (bagian.isMesh) {
+              // Nyalakan sakelar bayangannya
+              bagian.castShadow = true;
+              bagian.receiveShadow = true;
+
+              // Jika objek memantulkan cermin di ruangan yang hitam, objek akan terlihat gelap.
+              // Oleh karena itu, kita paksa objek ini menjadi non-logam agar teksturnya terlihat cerah!
+              bagian.material.metalness = 0.0;
+              bagian.material.roughness = 0.8;
+
+              // [PENTING] Masukkan bagian tubuh ini ke daftar benda incaran sinar laser!
+              interactableObjects.push(bagian);
+            }
+          });
+
+          // 5. Masukkan si Workbench ke atas panggung utama kita
+          scene.add(workbench);
+
+          // Pesan rahasia ke pengembang (Tekan F12 -> Console di browsermu)
+          console.log("Hore! workbench_low-poly.glb berhasil dimuat!");
+        },
+        function (kemajuan) {
+          // Menampilkan progres unduhan. Berguna jika file model 3D-mu besar ukurannya (misal 5MB+)
+          console.log(
+            (kemajuan.loaded / kemajuan.total) * 100 + "% Workbench terunduh",
+          );
+        },
+        function (error) {
+          // Menangkap jika ada kesalahan (misalnya kamu salah ketik nama file atau lupa menaruh filenya)
+          console.error(
+            "Yah, gagal memuat workbench. Cek apakah folder models dan filenya sudah benar.",
+            error,
+          );
+        },
+      );
+
+      // Mendengarkan saat tombol mouse DITEKAN (Klik dan Tahan)
+      document.addEventListener("mousedown", () => {
+        // Jangan menembakkan laser jika sedang di menu utama (kursor belum terkunci)
+        if (controls.isLocked !== true) return;
+
+        // 1. Arahkan laser dari posisi kamera, lurus melewati titik tengah layar (crosshair)
+        raycaster.setFromCamera(centerPosition, camera);
+
+        // 2. Tembakkan laser! Cek apakah laser menabrak benda-benda yang ada di daftar 'interactableObjects'
+        // Hasilnya adalah daftar benda yang tertembus sinar, berurutan dari yang paling dekat dengan kamera.
+        const intersects = raycaster.intersectObjects(interactableObjects);
+
+        // 3. Jika ada benda yang tertabrak (jumlah daftarnya lebih dari 0)
+        if (intersects.length > 0) {
+          // Ambil benda nomor 1 yang tertabrak (karena itu yang paling dekat)
+          interactedObject = intersects[0].object;
+
+          // Ubah Scale (Skala/Ukuran) benda tersebut menjadi 110% (1.1) di sumbu X, Y, Z
+          // Ukuran asli standar (default) adalah 1, 1, 1.
+          interactedObject.scale.set(1.1, 1.1, 1.1);
+
+          let cekParent = interactedObject;
+          while (cekParent) {
+            if (alatTebangPohon.includes(cekParent)) {
+              if (!tebang) {
+                tebang = true;
+              }
+              break;
+            }
+
+            if (cekParent === pineTree) {
+              if (tebang) {
+                pohonTumbang = true;
+              }
+              break;
+            }
+
+            if (cekParent === jerrycan) {
+              if (!bensin && !isiBensin) {
+                bensin = true;
+              }
+              break;
+            }
+
+            if (cekParent === truck) {
+              if (bensin) {
+                bensin = false;
+                isiBensin = true;
+
+                lampuKiri.intensity = 5;
+                lampuKanan.intensity = 5;
+              }
+              break;
+            }
+
+            if (cekParent === wheelbarrow) {
+              if (!dorongGerobak) {
+                dorongGerobak = true;
+              } else {
+                dorongGerobak = false;
+
+                wheelbarrow.position.y = -1;
+                wheelbarrow.rotation.x = 0;
+                wheelbarrow.rotation.z = 0;
+              }
+              break;
+            }
+
+            cekParent = cekParent.parent;
+          }
+        }
+      });
+
+      // Mendengarkan saat tombol mouse DILEPAS
+      document.addEventListener("mouseup", () => {
+        // Jika sebelumnya ada benda yang ukurannya sedang kita perbesar...
+        if (interactedObject !== null) {
+          // ...kembalikan skalanya ke ukuran normal 100% (1, 1, 1)
+          interactedObject.scale.set(1, 1, 1);
+
+          // Kosongkan kembali ingatan, karena kita sudah melepaskan klik.
+          interactedObject = null;
+        }
+      });
+
+      // ==============================================================================
+      // LANGKAH 2.5: MENAMBAHKAN CAHAYA (PENTING!)
+      // Karena kita sekarang menggunakan MeshStandardMaterial, kita WAJIB memiliki cahaya.
+      // Jika tidak ada cahaya, kubus kita akan tampak hitam gelap gulita!
+      // ==============================================================================
+
+      // 1. Cahaya Ambien (Ambient Light)
+      // Cahaya ini menerangi SEMUA objek dari segala arah secara merata.
+      // Fungsinya seperti cahaya pantulan di dalam ruangan, agar sisi gelap objek tidak hitam pekat.
+      // Argumen: warna cahaya (putih 0xffffff) dan intensitas/kekuatan cahaya (0.4).
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+      scene.add(ambientLight);
+
+      // 2. Cahaya Arah (Directional Light)
+      // Cahaya ini mirip seperti sinar matahari atau senter, memancar dari satu arah tertentu ke pusat panggung.
+      // Ini adalah kunci untuk membuat "Shading" (sisi terang dan sisi gelap pada objek), yang menegaskan bentuk 3D-nya.
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // Intensitas penuh (1)
+
+      // Kita atur posisi datangnya cahaya (Sumbu X, Y, Z).
+      // Kita letakkan agak ke kanan (10), ke atas (15), dan sedikit ke arah kita/depan layar (-5).
+      directionalLight.position.set(5, 5, 5);
+
+      // SAKELAR 2: MENGAKTIFKAN BAYANGAN PADA LAMPU (CASTER)
+      // Menjadikan lampu ini sebagai "sumber proyektor" bayangan.
+      directionalLight.castShadow = true;
+
+      // (Opsional) Mengatur ketajaman resolusi bayangan (Default: 512x512)
+      // Kita besarkan jadi 1024 agar ujung bayangannya tidak terlihat terlalu kotak-kotak (pixelated).
+      directionalLight.shadow.mapSize.width = 1024;
+      directionalLight.shadow.mapSize.height = 1024;
+
+      scene.add(directionalLight);
+
+      // ==============================================================================
+      // LANGKAH 3: ANIMASI DAN MERENDER (TAMPILKAN)
+      // Kita perlu membuat "film" dengan merender adegan secara terus-menerus.
+      // ==============================================================================
+
+      let getar = false;
+      let durasiGetar = 0;
+      let y = 1.5;
+      // Fungsi ini akan dipanggil berulang-ulang, biasanya 60 kali per detik (tergantung layar komputermu).
+      function animate() {
+        // Meminta browser untuk memanggil fungsi animate() lagi di frame berikutnya.
+        requestAnimationFrame(animate);
+
+        // -- Di sinilah kita melakukan perubahan pada objek (animasi) --
+        // Memutar kubus sedikit demi sedikit di sumbu X dan Y setiap frame-nya.
+        // Kita perlambat putarannya menjadi 0.005 agar tidak pusing saat kita sedang memutar kamera dengan mouse
+
+        // Membuat animasi bola melayang (Floating)
+        // Kita menggunakan waktu komputer (Date.now) dan ilmu matematika Sinus (Math.sin).
+        // Gelombang Sinus (Sine wave) memiliki nilai yang bergerak berayun secara mulus: naik, turun, naik, turun... berulang kali.
+        const time = Date.now() * 0.003; // Angka 0.003 mengatur KECEPATAN naik-turunnya
+
+        // MENGGERAKKAN KAMERA BERDASARKAN TOMBOL YANG DITEKAN (WASD)
+        // Kita menghapus controls.update() karena PointerLock tidak membutuhkannya.
+        // Sebagai gantinya, kita memindahkan kamera secara manual jika tombol ditekan.
+
+        // Cek apakah pemain sedang berada di dalam mode game (kursor terkunci)
+        if (controls.isLocked === true) {
+          const speed = 0.08; // Kecepatan berjalan. Cobalah ganti angkanya!
+
+          // controls.moveForward() & moveRight() adalah fungsi pintar dari plugin.
+          // Mereka memajukan kita tepat ke arah kita sedang menatap (secara relatif)!
+          if (moveForward) controls.moveForward(speed);
+          if (moveBackward) controls.moveForward(-speed); // Minus = berjalan mundur
+          if (moveRight) controls.moveRight(speed);
+          if (moveLeft) controls.moveRight(-speed); // Minus = melangkah ke kiri
+        }
+
+        if (pohonTumbang) {
+          if (angleTumbang < Math.PI / 2) {
+            angleTumbang += 0.175;
+            pineTree.rotation.x = angleTumbang;
+            pineTree.position.y = -1 - angleTumbang * 0.175;
+          } else {
+            pohonTumbang = false;
+            tumbang = true;
+            getar = true;
+            durasiGetar = 5;
+          }
+        } else if (!tumbang) {
+          const anginPohon = Date.now() * 0.0075;
+          pineTree.rotation.z = Math.sin(anginPohon) * 0.0075;
+          pineTree.rotation.x = Math.cos(anginPohon) * 0.0075;
+        }
+
+        if (mushroom) {
+          const anginJamur = Date.now() * 0.0075;
+          mushroom.rotation.z = Math.sin(anginJamur) * 0.0075;
+
+          const tumbuh = 1.5 + Math.sin(Date.now() * 0.002) * 0.0575;
+          mushroom.scale.set(tumbuh, tumbuh, tumbuh);
+        }
+
+        if (durasiGetar > 0) {
+          const intensityGetar = 0.05;
+          const getarX = (Math.random() - 0.5) * intensityGetar;
+          const getarY = (Math.random() - 0.5) * intensityGetar;
+          camera.position.x += getarX;
+          camera.position.y = y + getarY;
+
+          durasiGetar--;
+
+          if (durasiGetar === 0) {
+            getar = true;
+          }
+        } else if (getar) {
+          getar = false;
+
+          camera.position.y = y;
+        }
+
+        if (dorongGerobak) {
+          const arahPandang = new THREE.Vector3();
+          camera.getWorldDirection(arahPandang);
+          arahPandang.y = 0;
+          arahPandang.normalize();
+          wheelbarrow.position.x = camera.position.x + arahPandang.x * 1.2;
+          wheelbarrow.position.y = -0.9;
+          wheelbarrow.position.z = camera.position.z + arahPandang.z * 1.2;
+          wheelbarrow.rotation.y =
+            Math.atan2(arahPandang.x, arahPandang.z) + Math.PI;
+        }
+
+        if (truck) {
+          let getar = Date.now() * 0.05;
+          let intensitasGetar = 0.001;
+
+          if (isiBensin) {
+            getar = Date.now() * 0.08;
+            intensitasGetar = 0.003;
+          }
+
+          truck.position.y = -1 + Math.sin(getar) * intensitasGetar;
+          truck.rotation.z = Math.cos(getar) * (intensitasGetar * 0.5);
+        }
+
+        // -- Tahap Akhir: Jepret! --
+        // Menyuruh renderer untuk memotret adegan (scene) menggunakan kamera (camera) dan menampilkannya.
+        renderer.render(scene, camera);
+      }
+
+      // ==============================================================================
+      // LANGKAH EKTRA: MEMASTIKAN TAMPILAN BAIK SAAT LAYAR DIUBAH UKURANNYA
+      // ==============================================================================
+
+      // Jika pengguna memperbesar atau mengecilkan jendela browser,
+      // kita perlu menyesuaikan kamera dan perender (renderer) agar bentuk objek tidak lonjong/gepeng.
+      window.addEventListener("resize", () => {
+        // Update rasio aspek kamera dengan ukuran layar yang baru
+        camera.aspect = window.innerWidth / window.innerHeight;
+        // Penting: Beritahu kamera bahwa rasionya telah berubah
+        camera.updateProjectionMatrix();
+        // Update ukuran renderer (canvas) agar kembali penuh seukuran layar
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Saat halaman selesai dimuat, kita mulai proses animasinya!
+      window.onload = function () {
+        animate();
+      };
+    </script>
+  </body>
+</html>
